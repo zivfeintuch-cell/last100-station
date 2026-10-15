@@ -29,11 +29,13 @@
 
   /* ---- app ---- */
   #app{height:100%;display:flex;flex-direction:column}
+  header #hub{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   header{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface);border-bottom:1px solid var(--line);flex:none}
   header b{font-size:18px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .pill{font-size:12px;font-weight:700;padding:5px 11px;border-radius:999px;background:var(--surface-2);white-space:nowrap}
-  .hbtn.paused{background:#4a3a10;border-color:#f0b429;color:#ffd978}
+  .big.paused{background:#4a3a10;border-color:#f0b429;color:#ffd978}
   .camwrap.paused{outline:3px solid #f0b429;outline-offset:-3px}
+  .ver{font-size:10px;color:var(--muted,#8a94a6);direction:ltr}
   .pill.off{background:#4a1d1a;color:#ffb4ae}
   .hbtn{border:1.5px solid var(--line);background:var(--surface-2);color:var(--text);border-radius:10px;padding:8px 12px;font-weight:700;font-size:14px}
   main{flex:1;min-height:0;display:grid;grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) auto}
@@ -47,7 +49,7 @@
   .camwrap.done .guide{border-color:var(--ok);border-style:solid;box-shadow:0 0 0 6px rgba(46,210,122,.25)}
   .camwrap.flash::after{content:"";position:absolute;inset:0;background:#fff;opacity:.85;animation:fl .35s ease-out forwards}
   @keyframes fl{to{opacity:0}}
-  .bar{position:absolute;left:8%;right:8%;bottom:3.2%;height:10px;border-radius:99px;background:rgba(255,255,255,.18);overflow:hidden}
+  .bar{position:absolute;left:8%;right:8%;bottom:3.2%;height:14px;border-radius:99px;background:rgba(255,255,255,.18);overflow:hidden}
   .bar i{display:block;height:100%;width:0;background:var(--warn);transition:width .12s linear}
   .hint{position:absolute;top:3%;left:0;right:0;text-align:center;font-weight:700;font-size:15px;text-shadow:0 1px 6px #000}
 
@@ -73,7 +75,7 @@
   .ri{display:flex;justify-content:space-between;gap:10px;font-size:14px;padding:9px 12px;background:var(--surface);border:1px solid var(--line);border-radius:12px}
   .ri small{color:var(--muted);white-space:nowrap}
   .ri.bad{border-color:var(--err)} .ri.dup{border-color:var(--warn)}
-  #dbg{position:fixed;left:8px;bottom:8px;background:rgba(0,0,0,.75);color:#9fe;font:12px/1.4 ui-monospace,Consolas,monospace;padding:6px 9px;border-radius:8px;direction:ltr;text-align:left;z-index:9;white-space:pre}
+  #dbg{pointer-events:none;position:fixed;left:6px;top:64px;opacity:.88;background:rgba(0,0,0,.75);color:#9fe;font:11px/1.35 ui-monospace,Consolas,monospace;padding:6px 9px;border-radius:8px;direction:ltr;text-align:left;z-index:9;white-space:pre}
 </style>
 </head>
 <body>
@@ -90,8 +92,7 @@
 <div id="app" hidden>
   <header>
     <b id="hub">—</b>
-    <span class="pill" id="pill">מוכן</span>
-    <button class="hbtn" id="btnPause" title="עצירת הצילום האוטומטי (הכפתור הידני ממשיך לעבוד)">⏸ עצור צילום</button>
+    <span class="pill" id="pill">מוכן</span><span class="ver" id="ver"></span>
     <button class="hbtn" id="btnFlip" title="החלפת מצלמה קדמית/אחורית">🔄 מצלמה</button>
   </header>
   <main>
@@ -110,6 +111,7 @@
       </div>
       <div class="row2">
         <button class="big" id="btnShot">📸 צלם עכשיו</button>
+        <button class="big" id="btnPause" title="עצירת הצילום האוטומטי (הכפתור הידני ממשיך לעבוד)">⏸ עצור צילום</button>
         <button class="big dash" id="btnExtra" hidden>➕ תמונה נוספת</button>
         <button class="big danger" id="btnRetry" hidden>🔁 נסה שוב</button>
       </div>
@@ -127,7 +129,8 @@
   var CODE = (Q.get('e') || '').trim();
   function num(k, d){ var v = parseFloat(Q.get(k)); return isFinite(v) ? v : d; }
   // כיול (אפשר לשנות בכתובת, למשל ?hold=800&sd=22). ?debug=1 מציג מדדים חיים לכיול בשטח.
-  var P = { hold: num('hold', 1000), stable: num('stable', 3.0), sd: num('sd', 26), edge: num('edge', 5), tx: num('tx', 0.07), cool: num('cool', 2500), change: num('change', 14), tick: 120 };
+  var VER = 'v3'; $('#ver').textContent = VER;
+  var P = { hold: num('hold', 900), stable: num('stable', 6.0), sd: num('sd', 26), edge: num('edge', 5), tx: num('tx', 0.07), cool: num('cool', 2500), change: num('change', 14), tick: 120 };
   var DEBUG = Q.get('debug') === '1';
 
   function $(s){ return document.querySelector(s); }
@@ -197,6 +200,13 @@
     for (var y = 0; y < SH - 1; y++) for (var x2 = 0; x2 < SW - 1; x2++){ var k = y * SW + x2; e += Math.abs(L[k] - L[k + 1]) + Math.abs(L[k] - L[k + SW]); c += 2; }
     return { sd: Math.sqrt(v / n), edge: e / c };
   }
+  function coarse(L){                  // 24x18 ממוצעי בלוקים בלי הבהירות הכללית: רעד ידיים קטן והתאמת חשיפה כמעט לא משנים אותו
+    var bw = SW / 4, bh = SH / 4, C = new Float32Array(bw * bh), m = 0, x, y, i;
+    for (y = 0; y < SH; y++) for (x = 0; x < SW; x++) C[(y >> 2) * bw + (x >> 2)] += L[y * SW + x] / 16;
+    for (i = 0; i < C.length; i++) m += C[i]; m /= C.length;
+    for (i = 0; i < C.length; i++) C[i] -= m;
+    return C;
+  }
   function diff(a, b){ var s = 0; for (var i = 0; i < a.length; i++) s += Math.abs(a[i] - b[i]); return s / a.length; }
   function sharpness(canvas){          // שונות של לפלסיאן על גרסה קטנה: גבוה = חד
     var w = 320, h = Math.max(1, Math.round(canvas.height * 320 / canvas.width)), t = document.createElement('canvas'); t.width = w; t.height = h;
@@ -231,7 +241,7 @@
   }
 
   /* ---------------- state machine ---------------- */
-  var paused = false, state = 'idle', prev = null, refSig = null, rejSig = null, holdStart = 0, changeStart = 0, coolStart = 0, lastMetrics = {}, extraFor = null, extraUntil = 0, capturing = false;
+  var paused = false, state = 'idle', prev = null, prevC = null, refSig = null, rejSig = null, holdStart = 0, changeStart = 0, coolStart = 0, lastMetrics = {}, extraFor = null, extraUntil = 0, capturing = false;
   var camwrap = $('#camwrap');
   function setBanner(kind, text){ var b = $('#banner'); b.className = kind; b.textContent = text; }
   function setState(s){
@@ -248,7 +258,7 @@
 
   function tick(){
     if (!stream || video.readyState < 2 || !video.videoWidth || capturing) return;
-    var now = Date.now(), L = sample(), st = stats(L), motion = prev ? diff(L, prev) : 99; prev = L;
+    var now = Date.now(), L = sample(), st = stats(L), Lc = coarse(L), motion = prevC ? diff(Lc, prevC) : 99; prev = L; prevC = Lc;
     var present = st.sd >= P.sd && st.edge >= P.edge;
     lastMetrics = { sd: st.sd, edge: st.edge, motion: motion, present: present, tx: lastMetrics.tx, sharp: lastMetrics.sharp };   // tx/sharp נשמרים בין טיקים — חשוב לכיול בשטח
     if (extraFor && state === 'idle' && now > extraUntil){ setState('idle'); }
@@ -270,13 +280,15 @@
           else capture('auto', L);
         }
       } else if (state === 'hold'){ setState('idle'); }
+      if (state === 'idle' && present && motion > P.stable) $('#hint').textContent = 'החזיקו יציב…';
+      else if (state === 'idle' && !paused) $('#hint').textContent = 'הציגו את הבון / המסך בתוך המסגרת';
     } else if (state === 'cooldown'){
       var changed = !present || (refSig && diff(L, refSig) >= P.change);
       if (changed){ if (!changeStart) changeStart = now; if (now - changeStart >= 500 && now - coolStart >= P.cool) setState('idle'); }
       else changeStart = 0;
     }
     }
-    if (DEBUG){ var d = $('#dbg'); d.hidden = false; d.textContent = 'state ' + state + '\nsd ' + st.sd.toFixed(1) + ' (min ' + P.sd + ')\nedge ' + st.edge.toFixed(1) + ' (min ' + P.edge + ')\nmotion ' + motion.toFixed(2) + ' (max ' + P.stable + ')\npresent ' + present + '\ntext ' + (lastMetrics.tx != null ? lastMetrics.tx.toFixed(3) : '-') + ' (min ' + P.tx + ')\nsharp ' + (lastMetrics.sharp != null ? lastMetrics.sharp.toFixed(0) : '-'); }
+    if (DEBUG){ var d = $('#dbg'); d.hidden = false; d.textContent = VER + ' ' + state + (paused ? ' PAUSED' : '') + (present ? ' present' : ' -') + '\nsd ' + st.sd.toFixed(0) + '/' + P.sd + '  edge ' + st.edge.toFixed(1) + '/' + P.edge + '\nmotion ' + motion.toFixed(1) + '/' + P.stable + '  text ' + (lastMetrics.tx != null ? lastMetrics.tx.toFixed(2) : '-') + '/' + P.tx; }
   }
 
   var queueTimer = null;
