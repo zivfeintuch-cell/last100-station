@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0e1116">
+<title>עמדת סריקה · LAST100</title>
+<style>
+  :root{
+    --bg:#0e1116; --surface:#171c23; --surface-2:#1f2732; --line:#2b3440; --text:#eaf0f7; --muted:#8a97a6;
+    --ok:#2ed27a; --ok-d:#0e6b3b; --warn:#f5b23d; --err:#f2544b; --info:#5aa9ff;
+    --font:"Rubik","Heebo",system-ui,-apple-system,"Segoe UI",Arial,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  [hidden]{display:none !important}
+  html,body{height:100%}
+  body{background:var(--bg);color:var(--text);font-family:var(--font);-webkit-font-smoothing:antialiased;overflow:hidden;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+  button{font-family:inherit;cursor:pointer}
+
+  /* ---- start screen ---- */
+  #start{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;text-align:center;z-index:5;background:var(--bg)}
+  #start h1{font-size:26px}
+  #start p{color:var(--muted);max-width:520px;line-height:1.6;font-size:15px}
+  #btnStart{border:0;border-radius:20px;background:var(--ok);color:#03130b;font-weight:800;font-size:24px;padding:22px 46px;box-shadow:0 8px 30px rgba(46,210,122,.25)}
+  #btnStart:disabled{opacity:.55}
+  #msg{min-height:22px;font-weight:700;color:var(--warn);max-width:520px}
+  #msg.err{color:var(--err)}
+
+  /* ---- app ---- */
+  #app{height:100%;display:flex;flex-direction:column}
+  header{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface);border-bottom:1px solid var(--line);flex:none}
+  header b{font-size:18px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pill{font-size:12px;font-weight:700;padding:5px 11px;border-radius:999px;background:var(--surface-2);white-space:nowrap}
+  .pill.off{background:#4a1d1a;color:#ffb4ae}
+  .hbtn{border:1.5px solid var(--line);background:var(--surface-2);color:var(--text);border-radius:10px;padding:8px 12px;font-weight:700;font-size:14px}
+  main{flex:1;min-height:0;display:grid;grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) auto}
+  @media (orientation:landscape) and (min-width:760px){ main{grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);grid-template-rows:minmax(0,1fr)} }
+
+  .camwrap{position:relative;background:#000;min-height:0;overflow:hidden}
+  video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
+  video.mirror{transform:scaleX(-1)}
+  .guide{position:absolute;inset:7% 8%;border:3px dashed rgba(255,255,255,.55);border-radius:22px;pointer-events:none;transition:border-color .2s}
+  .camwrap.hold .guide{border-color:var(--warn);border-style:solid}
+  .camwrap.done .guide{border-color:var(--ok);border-style:solid;box-shadow:0 0 0 6px rgba(46,210,122,.25)}
+  .camwrap.flash::after{content:"";position:absolute;inset:0;background:#fff;opacity:.85;animation:fl .35s ease-out forwards}
+  @keyframes fl{to{opacity:0}}
+  .bar{position:absolute;left:8%;right:8%;bottom:3.2%;height:10px;border-radius:99px;background:rgba(255,255,255,.18);overflow:hidden}
+  .bar i{display:block;height:100%;width:0;background:var(--warn);transition:width .12s linear}
+  .hint{position:absolute;top:3%;left:0;right:0;text-align:center;font-weight:700;font-size:15px;text-shadow:0 1px 6px #000}
+
+  #panel{display:flex;flex-direction:column;gap:10px;padding:12px;overflow:auto;min-height:0}
+  #banner{border-radius:18px;padding:14px 16px;font-weight:800;font-size:22px;text-align:center;background:var(--surface-2);transition:background .15s}
+  #banner.idle{background:#16314f;color:#cfe6ff}
+  #banner.hold{background:#4a3a12;color:#ffe2a0}
+  #banner.ok{background:var(--ok-d);color:#d9ffe9}
+  #banner.warn{background:#5a4210;color:#ffe2a0}
+  #banner.err{background:#5a1d19;color:#ffd2ce}
+  #serialBox{background:var(--surface);border:1px solid var(--line);border-radius:18px;text-align:center;padding:8px 10px 12px}
+  #serialBox .lbl{font-size:12px;font-weight:700;color:var(--muted)}
+  #serial{font-size:clamp(64px,13vw,120px);font-weight:900;line-height:1.05;color:var(--ok);font-variant-numeric:tabular-nums}
+  #serial.pending{color:var(--muted)}
+  #detail{font-size:16px;line-height:1.5;color:var(--text);margin-top:2px;min-height:24px}
+  #detail .tag{display:inline-block;margin-inline-start:6px;background:var(--warn);color:#03130b;border-radius:999px;font-size:12px;font-weight:800;padding:2px 9px}
+  .row2{display:flex;gap:10px;flex-wrap:wrap}
+  .big{flex:1;min-width:150px;border:1.5px solid var(--line);border-radius:14px;background:var(--surface);color:var(--text);font-weight:800;font-size:16px;padding:14px}
+  .big.dash{border-style:dashed;border-color:var(--ok);color:var(--ok)}
+  .big.danger{border-color:var(--err);color:var(--err);background:#2a1614}
+  .big.on{background:var(--ok-d);border-color:var(--ok);color:#d9ffe9}
+  #recent{display:flex;flex-direction:column;gap:6px}
+  .ri{display:flex;justify-content:space-between;gap:10px;font-size:14px;padding:9px 12px;background:var(--surface);border:1px solid var(--line);border-radius:12px}
+  .ri small{color:var(--muted);white-space:nowrap}
+  .ri.bad{border-color:var(--err)} .ri.dup{border-color:var(--warn)}
+  #dbg{position:fixed;left:8px;bottom:8px;background:rgba(0,0,0,.75);color:#9fe;font:12px/1.4 ui-monospace,Consolas,monospace;padding:6px 9px;border-radius:8px;direction:ltr;text-align:left;z-index:9;white-space:pre}
+</style>
+</head>
+<body>
+
+<div id="start">
+  <h1>עמדת סריקה · LAST100</h1>
+  <p id="startHub">טוען…</p>
+  <p>מציבים את הבון או את מסך האפליקציה מול המצלמה ומחזיקים רגע ביציבות. העמדה מצלמת לבד ומראה מספר פנימי גדול לרישום על השקית.</p>
+  <button id="btnStart" disabled>▶ הפעל עמדה</button>
+  <div id="msg"></div>
+  <p style="font-size:12.5px">מומלץ: מסך הטאבלט דלוק תמיד, המצלמה יציבה על מעמד, אור מפוזר ללא השתקפות על המסך.</p>
+</div>
+
+<div id="app" hidden>
+  <header>
+    <b id="hub">—</b>
+    <span class="pill" id="pill">מוכן</span>
+    <button class="hbtn" id="btnFlip" title="החלפת מצלמה קדמית/אחורית">🔄 מצלמה</button>
+  </header>
+  <main>
+    <div class="camwrap" id="camwrap">
+      <video id="cam" playsinline muted autoplay></video>
+      <div class="guide"></div>
+      <div class="hint" id="hint">הציגו את הבון / המסך בתוך המסגרת</div>
+      <div class="bar"><i id="barfill"></i></div>
+    </div>
+    <section id="panel">
+      <div id="banner" class="idle">מוכן — הציגו בון</div>
+      <div id="serialBox" hidden>
+        <div class="lbl">מס׳ פנימי — לרשום על השקית</div>
+        <div id="serial">—</div>
+        <div id="detail"></div>
+      </div>
+      <div class="row2">
+        <button class="big" id="btnShot">📸 צלם עכשיו</button>
+        <button class="big dash" id="btnExtra" hidden>➕ תמונה נוספת</button>
+        <button class="big danger" id="btnRetry" hidden>🔁 נסה שוב</button>
+      </div>
+      <div id="recent"></div>
+    </section>
+  </main>
+</div>
+<div id="dbg" hidden></div>
+
+<script>
+(function(){
+  "use strict";
+  var API = 'https://script.google.com/macros/s/AKfycbwYT3y3z0SJbvyqWYEx-aRLBZBiSpMmdO0kCLLuXoTFVSmq1gdeaeP_Oa9hZF6Hwyfclg/exec';
+  var Q = new URLSearchParams(location.search);
+  var CODE = (Q.get('e') || '').trim();
+  function num(k, d){ var v = parseFloat(Q.get(k)); return isFinite(v) ? v : d; }
+  // כיול (אפשר לשנות בכתובת, למשל ?hold=800&sd=22). ?debug=1 מציג מדדים חיים לכיול בשטח.
+  var P = { hold: num('hold', 1000), stable: num('stable', 3.0), sd: num('sd', 26), edge: num('edge', 5), cool: num('cool', 2500), change: num('change', 14), tick: 120 };
+  var DEBUG = Q.get('debug') === '1';
+
+  function $(s){ return document.querySelector(s); }
+  function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function store(k, v){ try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) {} return null; }
+
+  /* ---------------- sound / vibration ---------------- */
+  var actx = null;
+  function unlockAudio(){ try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); if (actx.state === 'suspended') actx.resume(); } catch (e) {} }
+  function beep(kind){
+    try { if (navigator.vibrate) navigator.vibrate(kind === 'err' ? [120, 60, 120] : 60); } catch (e) {}
+    if (!actx) return;
+    var seq = kind === 'ok' ? [[880, 0, .12]] : kind === 'read' ? [[660, 0, .09], [990, .11, .12]] : kind === 'warn' ? [[520, 0, .14], [520, .2, .14]] : [[200, 0, .35]];
+    seq.forEach(function(n){
+      try {
+        var o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime + n[1];
+        o.type = 'sine'; o.frequency.value = n[0]; g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(.35, t + .01); g.gain.exponentialRampToValueAtTime(.0001, t + n[2]);
+        o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + n[2] + .02);
+      } catch (e) {}
+    });
+  }
+
+  /* ---------------- network ---------------- */
+  function post(body, ms){
+    var ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null, timer = null;
+    var p = new Promise(function(resolve){
+      timer = setTimeout(function(){ if (ctl) ctl.abort(); resolve({ ok: false, error: 'timeout' }); }, ms);
+      fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body), signal: ctl ? ctl.signal : undefined })
+        .then(function(r){ return r.json(); })
+        .then(function(j){ resolve(j || { ok: false, error: 'empty' }); })
+        .catch(function(e){ resolve({ ok: false, error: (e && e.name === 'AbortError') ? 'timeout' : 'network' }); });
+    });
+    return p.then(function(r){ clearTimeout(timer); return r; });
+  }
+
+  /* ---------------- camera ---------------- */
+  var video = $('#cam'), stream = null, facing = store('st_facing') || 'environment';
+  function startCamera(){
+    if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) return Promise.reject(new Error('nomedia'));
+    if (stream){ try { stream.getTracks().forEach(function(t){ t.stop(); }); } catch (e) {} stream = null; }
+    return navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false })
+      .then(function(s){
+        stream = s; video.srcObject = s; video.classList.toggle('mirror', facing === 'user');
+        return video.play().catch(function(){}).then(function(){ return s; });
+      });
+  }
+  $('#btnFlip').onclick = function(){ facing = (facing === 'environment') ? 'user' : 'environment'; store('st_facing', facing); startCamera().catch(function(){ setBanner('err', 'לא הצלחתי להחליף מצלמה'); }); };
+
+  var wake = null;
+  function keepAwake(){ try { if (navigator.wakeLock && !document.hidden) navigator.wakeLock.request('screen').then(function(w){ wake = w; }).catch(function(){}); } catch (e) {} }
+  document.addEventListener('visibilitychange', function(){ if (!document.hidden){ keepAwake(); pump(); } });
+
+  /* ---------------- scene analysis (stable-object detection) ---------------- */
+  var SW = 96, SH = 72, sc = document.createElement('canvas'); sc.width = SW; sc.height = SH;
+  var sctx = sc.getContext('2d', { willReadFrequently: true });
+  function sample(){
+    sctx.drawImage(video, 0, 0, SW, SH);
+    var d = sctx.getImageData(0, 0, SW, SH).data, L = new Float32Array(SW * SH);
+    for (var i = 0, j = 0; i < L.length; i++, j += 4) L[i] = 0.299 * d[j] + 0.587 * d[j + 1] + 0.114 * d[j + 2];
+    return L;
+  }
+  function stats(L){
+    var n = L.length, s = 0, i;
+    for (i = 0; i < n; i++) s += L[i];
+    var mean = s / n, v = 0, e = 0, c = 0;
+    for (i = 0; i < n; i++){ var x = L[i] - mean; v += x * x; }
+    for (var y = 0; y < SH - 1; y++) for (var x2 = 0; x2 < SW - 1; x2++){ var k = y * SW + x2; e += Math.abs(L[k] - L[k + 1]) + Math.abs(L[k] - L[k + SW]); c += 2; }
+    return { sd: Math.sqrt(v / n), edge: e / c };
+  }
+  function diff(a, b){ var s = 0; for (var i = 0; i < a.length; i++) s += Math.abs(a[i] - b[i]); return s / a.length; }
+  function sharpness(canvas){          // שונות של לפלסיאן על גרסה קטנה: גבוה = חד
+    var w = 320, h = Math.max(1, Math.round(canvas.height * 320 / canvas.width)), t = document.createElement('canvas'); t.width = w; t.height = h;
+    var c = t.getContext('2d', { willReadFrequently: true }); c.drawImage(canvas, 0, 0, w, h);
+    var d = c.getImageData(0, 0, w, h).data, g = new Float32Array(w * h), i;
+    for (i = 0; i < g.length; i++) g[i] = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2];
+    var s = 0, s2 = 0, n = 0;
+    for (var y = 1; y < h - 1; y++) for (var x = 1; x < w - 1; x++){ var k = y * w + x, l = 4 * g[k] - g[k - 1] - g[k + 1] - g[k - w] - g[k + w]; s += l; s2 += l * l; n++; }
+    return n ? (s2 / n - (s / n) * (s / n)) : 0;
+  }
+  function grab(){                     // מצלם פריים מלא (עד 1500px) לקנבס
+    var vw = video.videoWidth || 640, vh = video.videoHeight || 480, sca = Math.min(1, 1500 / Math.max(vw, vh));
+    var c = document.createElement('canvas'); c.width = Math.round(vw * sca); c.height = Math.round(vh * sca);
+    c.getContext('2d').drawImage(video, 0, 0, c.width, c.height);
+    return c;
+  }
+
+  /* ---------------- state machine ---------------- */
+  var state = 'idle', prev = null, refSig = null, holdStart = 0, changeStart = 0, coolStart = 0, lastMetrics = {}, extraFor = null, extraUntil = 0, capturing = false;
+  var camwrap = $('#camwrap');
+  function setBanner(kind, text){ var b = $('#banner'); b.className = kind; b.textContent = text; }
+  function setState(s){
+    state = s; holdStart = 0; changeStart = 0;
+    camwrap.classList.toggle('hold', s === 'hold');
+    camwrap.classList.toggle('done', s === 'cooldown');
+    $('#barfill').style.width = '0%';
+    if (s === 'idle'){
+      if (extraFor && Date.now() < extraUntil) setBanner('idle', 'הציגו את התמונה הנוספת להזמנה #' + extraFor.serial);
+      else { extraFor = null; setBanner('idle', 'מוכן — הציגו בון'); }
+      $('#hint').textContent = 'הציגו את הבון / המסך בתוך המסגרת';
+    } else if (s === 'cooldown'){ $('#hint').textContent = 'הוציאו את הבון — מוכן לבא אחריו'; }
+  }
+
+  function tick(){
+    if (!stream || video.readyState < 2 || !video.videoWidth || capturing) return;
+    var now = Date.now(), L = sample(), st = stats(L), motion = prev ? diff(L, prev) : 99; prev = L;
+    var present = st.sd >= P.sd && st.edge >= P.edge;
+    lastMetrics = { sd: st.sd, edge: st.edge, motion: motion, present: present };
+    if (extraFor && state === 'idle' && now > extraUntil){ setState('idle'); }
+
+    if (state === 'idle' || state === 'hold'){
+      if (present && motion <= P.stable){
+        if (!holdStart){ holdStart = now; if (state !== 'hold'){ state = 'hold'; camwrap.classList.add('hold'); setBanner('hold', 'מחזיקים… אל תזיזו'); $('#hint').textContent = 'יציב — עוד רגע'; } }
+        var pr = Math.min(1, (now - holdStart) / P.hold);
+        $('#barfill').style.width = Math.round(pr * 100) + '%';
+        if (pr >= 1) capture('auto', L);
+      } else if (state === 'hold'){ setState('idle'); }
+    } else if (state === 'cooldown'){
+      var changed = !present || (refSig && diff(L, refSig) >= P.change);
+      if (changed){ if (!changeStart) changeStart = now; if (now - changeStart >= 500 && now - coolStart >= P.cool) setState('idle'); }
+      else changeStart = 0;
+    }
+    if (DEBUG){ var d = $('#dbg'); d.hidden = false; d.textContent = 'state ' + state + '\nsd ' + st.sd.toFixed(1) + ' (min ' + P.sd + ')\nedge ' + st.edge.toFixed(1) + ' (min ' + P.edge + ')\nmotion ' + motion.toFixed(2) + ' (max ' + P.stable + ')\npresent ' + present + '\nsharp ' + (lastMetrics.sharp != null ? lastMetrics.sharp.toFixed(0) : '-'); }
+  }
+
+  var queueTimer = null;
+  function capture(kind, sig){
+    if (capturing) return;
+    capturing = true; state = 'capturing';
+    camwrap.classList.remove('hold'); camwrap.classList.add('flash');
+    setTimeout(function(){ camwrap.classList.remove('flash'); }, 380);
+    var best = null, shots = 0;
+    function one(){
+      var c = grab(), sh = sharpness(c);
+      if (!best || sh > best.sh) best = { c: c, sh: sh };
+      if (++shots < 3) setTimeout(one, 110); else finish();
+    }
+    function finish(){
+      lastMetrics.sharp = best.sh;
+      var b64 = best.c.toDataURL('image/jpeg', 0.72).split(',')[1];
+      refSig = sig || (prev ? prev.slice() : null);
+      var asExtra = extraFor && Date.now() < extraUntil && extraFor.id;
+      var item = asExtra ? { mode: 'extra', id: extraFor.id, serial: extraFor.serial, stage: 'extra' } : { mode: 'new', stage: 'start' };
+      item.k = ++seq; item.b64 = b64; item.tries = 0; item.nextAt = 0; item.busy = false; item.t = Date.now(); item.kind = kind;
+      items.unshift(item); if (!asExtra) lastItem = item; else showExtraQueued(item);
+      extraFor = null; capturing = false; coolStart = Date.now();
+      state = 'cooldown'; camwrap.classList.add('done'); setBanner('ok', 'צולם ✓ — מעלה…'); beep('ok'); $('#barfill').style.width = '0%'; $('#hint').textContent = 'הוציאו את הבון — מוכן לבא אחריו';
+      if (!asExtra){ $('#serialBox').hidden = false; $('#serial').textContent = '…'; $('#serial').className = 'pending'; $('#detail').textContent = 'שומר שורה…'; }
+      render(); pump();
+    }
+    one();
+  }
+  $('#btnShot').onclick = function(){ unlockAudio(); if (stream && !capturing) capture('manual', prev ? prev.slice() : null); };
+
+  /* ---------------- upload queue ---------------- */
+  var items = [], seq = 0, lastItem = null, FATAL = { bad_code: 1, not_found: 1, not_yours: 1, too_many_photos: 1, bad_action: 1, too_big: 1 };
+  var ERRTXT = { timeout: 'תקלת רשת', network: 'אין חיבור', busy: 'המערכת עסוקה', bad_code: 'קוד עמדה לא תקין', still_reading: 'הקריאה הראשונה עוד רצה',
+    too_many_photos: 'כבר יש 4 תמונות להזמנה', not_found: 'ההזמנה לא נמצאה', not_yours: 'ההזמנה שייכת לעמדה אחרת' };
+  function errText(e){ e = String(e || ''); return ERRTXT[e] || (/^ai_failed/.test(e) ? 'ה-AI לא הצליח לקרוא' : e.slice(0, 40)); }
+  function active(){ return items.filter(function(i){ return i.stage !== 'done' && !i.failed; }); }
+  function runningCount(stage){ return items.filter(function(i){ return i.busy && (stage ? i.stage === stage : true); }).length; }
+
+  function pump(){
+    var now = Date.now();
+    items.slice().reverse().forEach(function(it){      // מהישן לחדש
+      if (it.busy || it.failed || it.stage === 'done' || it.nextAt > now) return;
+      if (it.stage === 'start' && runningCount('start') >= 1) return;
+      if (it.stage !== 'start' && runningCount() >= 4) return;
+      step(it);
+    });
+    render();
+  }
+  function fail(it, res){
+    var code = res && res.error;
+    it.err = errText(code); it.busy = false;
+    if (FATAL[code]){ it.failed = true; it.fatal = true; beep('err'); }
+    else { it.tries++; if (it.tries >= 6){ it.failed = true; beep('err'); } else it.nextAt = Date.now() + Math.min(30000, 3000 * it.tries); }
+    render();
+  }
+  function step(it){
+    it.busy = true;
+    if (it.stage === 'start'){
+      post({ action: 'start', code: CODE }, 25000).then(function(res){
+        if (!res || res.ok !== true) return fail(it, res);
+        it.id = res.id; it.serial = res.serial; it.hm = res.hm; it.stage = 'finish'; it.busy = false; it.tries = 0; it.err = '';
+        if (lastItem === it){ $('#serial').textContent = '#' + res.serial; $('#serial').className = ''; $('#detail').textContent = 'קורא את הבון…'; setBanner('ok', 'צולם ✓ — רשמו #' + res.serial + ' על השקית'); }
+        render(); setTimeout(pump, 0);
+      });
+    } else if (it.stage === 'finish'){
+      post({ action: 'finish', code: CODE, id: it.id, img: it.b64, mime: 'image/jpeg' }, 90000).then(function(res){
+        if (!res || res.ok !== true) return fail(it, res);
+        it.stage = 'done'; it.busy = false; it.res = res; it.b64 = null; it.err = '';
+        showRead(it, res, false); render(); setTimeout(pump, 0);
+      });
+    } else if (it.stage === 'extra'){
+      post({ action: 'extra', code: CODE, id: it.id, img: it.b64, mime: 'image/jpeg' }, 90000).then(function(res){
+        if (!res || res.ok !== true) return fail(it, res);
+        it.stage = 'done'; it.busy = false; it.res = res; it.b64 = null; it.err = '';
+        if (it.id === (lastItem && lastItem.id)) lastItem.res = res;
+        showRead(it, res, true); render(); setTimeout(pump, 0);
+      });
+    }
+  }
+  setInterval(pump, 2000);
+  window.addEventListener('online', pump);
+  window.addEventListener('beforeunload', function(e){ if (active().length){ e.preventDefault(); e.returnValue = ''; } });
+
+  function summary(o){
+    o = o || {};
+    return [o.company, o.tower, o.floor ? 'קומה ' + o.floor : '', o.orderNo ? 'הזמנה ' + o.orderNo : '', o.customer].filter(Boolean).join(' · ');
+  }
+  function showRead(it, res, isExtra){
+    if (it !== lastItem && !(isExtra && lastItem && lastItem.id === it.id)) return;        // הוצגה בינתיים הזמנה חדשה יותר — לא דורסים
+    var o = res.order || {}, dupTxt = res.duplicate ? (res.dupKind === 'likely' ? 'כפילות אפשרית' : 'כפילות') + (res.dupOf ? ' להזמנה #' + res.dupOf : '') : '';
+    var kind = (!isExtra && res.aiFailed) ? 'err' : (res.duplicate ? 'warn' : 'ok');
+    var head = isExtra ? ((res.added && res.added.length) ? 'עודכן ✓ · נוסף: ' + res.added.join(', ') : 'התמונה נשמרה')
+             : res.aiFailed ? 'לא נקרא — למלא ידנית בלוח' : (res.duplicate ? 'נקרא — שימו לב: ' + dupTxt : 'נקרא ✓');
+    setBanner(kind, head);
+    $('#serialBox').hidden = false; $('#serial').textContent = '#' + (it.serial || ''); $('#serial').className = '';
+    $('#detail').innerHTML = esc(summary(o) || (res.aiFailed ? '' : '—')) + (dupTxt ? '<span class="tag">' + esc(dupTxt) + '</span>' : '');
+    beep(kind === 'ok' ? 'read' : kind === 'warn' ? 'warn' : 'err');
+  }
+  function showExtraQueued(it){ setBanner('ok', 'תמונה נוספת צולמה ל-#' + it.serial + ' — מעלה…'); }
+
+  $('#btnExtra').onclick = function(){
+    if (!lastItem || !lastItem.id) return;
+    extraFor = { id: lastItem.id, serial: lastItem.serial }; extraUntil = Date.now() + 45000;
+    if (state === 'cooldown') { coolStart = 0; }            // מותר להתחיל מיד כשהמסך מוחלף
+    setBanner('idle', 'הציגו את התמונה הנוספת להזמנה #' + lastItem.serial); render();
+  };
+  $('#btnRetry').onclick = function(){ items.forEach(function(it){ if (it.failed && !it.fatal){ it.failed = false; it.tries = 0; it.nextAt = 0; } }); pump(); };
+
+  function render(){
+    var pend = active().length, fails = items.filter(function(i){ return i.failed; }).length;
+    var pill = $('#pill');
+    pill.textContent = fails ? 'יש כשלונות (' + fails + ')' : pend ? 'מעלה (' + pend + ')…' : 'מוכן';
+    pill.className = 'pill' + (fails ? ' off' : '');
+    var canExtra = lastItem && lastItem.id && lastItem.stage !== 'start';
+    $('#btnExtra').hidden = !canExtra; if (canExtra) $('#btnExtra').textContent = '➕ תמונה נוספת ל-#' + lastItem.serial;
+    var retryable = items.filter(function(i){ return i.failed && !i.fatal; }).length;
+    $('#btnRetry').hidden = !retryable; $('#btnRetry').textContent = '🔁 נסה שוב (' + retryable + ')';
+    $('#recent').innerHTML = items.slice(0, 8).map(function(it){
+      var o = (it.res && it.res.order) || {}, st, cls = '';
+      if (it.failed){ st = 'נכשל: ' + esc(it.err || ''); cls = ' bad'; }
+      else if (it.stage === 'done'){ st = it.mode === 'extra' ? 'תמונה נוספת ✓' : (it.res && it.res.aiFailed ? 'למילוי ידני' : it.res && it.res.duplicate ? 'כפילות' : 'נקרא ✓'); if (it.res && (it.res.aiFailed)) cls = ' bad'; else if (it.res && it.res.duplicate) cls = ' dup'; }
+      else if (it.err){ st = 'מנסה שוב… (' + esc(it.err) + ')'; }
+      else st = it.stage === 'start' ? 'שומר…' : 'קורא…';
+      return '<div class="ri' + cls + '"><span>' + (it.serial ? '#' + esc(it.serial) + ' · ' : '') + esc(summary(o) || (it.mode === 'extra' ? 'תמונה נוספת' : '…')) + '</span><small>' + st + '</small></div>';
+    }).join('');
+  }
+
+  /* ---------------- start ---------------- */
+  function msg(t, err){ var m = $('#msg'); m.textContent = t || ''; m.className = err ? 'err' : ''; }
+  var HUB = '';
+  function boot(){
+    if (!CODE){ $('#startHub').textContent = 'חסר קוד עמדה בכתובת (…?e=<קוד>)'; msg('פתחו את הקישור שמופיע בבק-אופיס ליד העמדה', true); return; }
+    $('#startHub').textContent = 'בודק עמדה…';
+    post({ action: 'ping', code: CODE }, 25000).then(function(res){
+      if (res && res.ok){ HUB = res.hub; $('#startHub').textContent = 'עמדה: ' + HUB; $('#btnStart').disabled = false; }
+      else if (res && res.error === 'bad_code'){ $('#startHub').textContent = 'קוד עמדה לא נמצא'; msg('הקוד "' + CODE + '" לא קיים או כבוי בגיליון', true); }
+      else { $('#startHub').textContent = 'אין חיבור למערכת'; msg('בדקו חיבור לאינטרנט ורעננו', true); $('#btnStart').disabled = false; }
+    });
+  }
+  $('#btnStart').onclick = function(){
+    unlockAudio(); msg('מפעיל מצלמה…'); $('#btnStart').disabled = true;
+    startCamera().then(function(){
+      $('#start').hidden = true; $('#app').hidden = false; $('#hub').textContent = HUB || CODE; keepAwake(); setState('idle'); render();
+      setInterval(tick, P.tick);
+    }).catch(function(e){
+      $('#btnStart').disabled = false;
+      var n = e && e.name;
+      msg(n === 'NotAllowedError' ? 'הרשאת מצלמה נדחתה — אשרו בהגדרות הדפדפן ורעננו' : n === 'NotFoundError' ? 'לא נמצאה מצלמה במכשיר' : (e && e.message === 'nomedia') ? 'הדפדפן הזה לא תומך במצלמה חיה (נדרש https)' : 'לא הצלחתי להפעיל מצלמה (' + (n || 'שגיאה') + ')', true);
+    });
+  };
+  boot();
+})();
+</script>
+</body>
+</html>
