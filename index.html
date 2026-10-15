@@ -129,8 +129,8 @@
   var CODE = (Q.get('e') || '').trim();
   function num(k, d){ var v = parseFloat(Q.get(k)); return isFinite(v) ? v : d; }
   // כיול (אפשר לשנות בכתובת, למשל ?hold=800&sd=22). ?debug=1 מציג מדדים חיים לכיול בשטח.
-  var VER = 'v3'; $('#ver').textContent = VER;
-  var P = { hold: num('hold', 900), stable: num('stable', 6.0), sd: num('sd', 26), edge: num('edge', 5), tx: num('tx', 0.07), cool: num('cool', 2500), change: num('change', 14), tick: 120 };
+  var VER = 'v4'; $('#ver').textContent = VER;
+  var P = { hold: num('hold', 900), stable: num('stable', 10), sd: num('sd', 24), edge: num('edge', 3.5), tx: num('tx', 0), loose: num('loose', 2800), cool: num('cool', 2500), change: num('change', 14), tick: 120 };
   var DEBUG = Q.get('debug') === '1';
 
   function $(s){ return document.querySelector(s); }
@@ -200,13 +200,14 @@
     for (var y = 0; y < SH - 1; y++) for (var x2 = 0; x2 < SW - 1; x2++){ var k = y * SW + x2; e += Math.abs(L[k] - L[k + 1]) + Math.abs(L[k] - L[k + SW]); c += 2; }
     return { sd: Math.sqrt(v / n), edge: e / c };
   }
-  function coarse(L){                  // 24x18 ממוצעי בלוקים בלי הבהירות הכללית: רעד ידיים קטן והתאמת חשיפה כמעט לא משנים אותו
-    var bw = SW / 4, bh = SH / 4, C = new Float32Array(bw * bh), m = 0, x, y, i;
-    for (y = 0; y < SH; y++) for (x = 0; x < SW; x++) C[(y >> 2) * bw + (x >> 2)] += L[y * SW + x] / 16;
-    for (i = 0; i < C.length; i++) m += C[i]; m /= C.length;
-    for (i = 0; i < C.length; i++) C[i] -= m;
+  // מפת "כמה קצוות/טקסט יש בכל בלוק" (12x9 בלוקים). בניגוד להפרש בהירות, היא לא מושפעת מהשתקפויות, פסי רענון של מסך או התאמת חשיפה,
+  // וגם רעד ידיים של כמה פיקסלים כמעט לא משנה אותה. שינוי = % מסך האנרגיה שזז בין בלוקים.
+  function coarse(L){
+    var bw = 12, bh = 9, C = new Float32Array(bw * bh), x, y;
+    for (y = 0; y < SH - 1; y++) for (x = 0; x < SW - 1; x++){ var k = y * SW + x; C[((y / 8) | 0) * bw + ((x / 8) | 0)] += Math.abs(L[k] - L[k + 1]) + Math.abs(L[k] - L[k + SW]); }
     return C;
   }
+  function relDiff(a, b){ var d = 0, t = 0; for (var i = 0; i < a.length; i++){ d += Math.abs(a[i] - b[i]); t += a[i] + b[i]; } return t > 0 ? 100 * d / t : 0; }
   function diff(a, b){ var s = 0; for (var i = 0; i < a.length; i++) s += Math.abs(a[i] - b[i]); return s / a.length; }
   function sharpness(canvas){          // שונות של לפלסיאן על גרסה קטנה: גבוה = חד
     var w = 320, h = Math.max(1, Math.round(canvas.height * 320 / canvas.width)), t = document.createElement('canvas'); t.width = w; t.height = h;
@@ -241,11 +242,11 @@
   }
 
   /* ---------------- state machine ---------------- */
-  var paused = false, state = 'idle', prev = null, prevC = null, refSig = null, rejSig = null, holdStart = 0, changeStart = 0, coolStart = 0, lastMetrics = {}, extraFor = null, extraUntil = 0, capturing = false;
+  var looseStart = 0, paused = false, state = 'idle', prev = null, prevC = null, refSig = null, rejSig = null, holdStart = 0, changeStart = 0, coolStart = 0, lastMetrics = {}, extraFor = null, extraUntil = 0, capturing = false;
   var camwrap = $('#camwrap');
   function setBanner(kind, text){ var b = $('#banner'); b.className = kind; b.textContent = text; }
   function setState(s){
-    state = s; holdStart = 0; changeStart = 0;
+    state = s; holdStart = 0; changeStart = 0; looseStart = 0;
     camwrap.classList.toggle('hold', s === 'hold');
     camwrap.classList.toggle('done', s === 'cooldown');
     $('#barfill').style.width = '0%';
@@ -258,7 +259,7 @@
 
   function tick(){
     if (!stream || video.readyState < 2 || !video.videoWidth || capturing) return;
-    var now = Date.now(), L = sample(), st = stats(L), Lc = coarse(L), motion = prevC ? diff(Lc, prevC) : 99; prev = L; prevC = Lc;
+    var now = Date.now(), L = sample(), st = stats(L), Lc = coarse(L), motion = prevC ? relDiff(Lc, prevC) : 99; prev = L; prevC = Lc;
     var present = st.sd >= P.sd && st.edge >= P.edge;
     lastMetrics = { sd: st.sd, edge: st.edge, motion: motion, present: present, tx: lastMetrics.tx, sharp: lastMetrics.sharp };   // tx/sharp נשמרים בין טיקים — חשוב לכיול בשטח
     if (extraFor && state === 'idle' && now > extraUntil){ setState('idle'); }
@@ -270,13 +271,15 @@
     if (rejSig && (!present || diff(L, rejSig) >= P.change)){ rejSig = null; if (state === 'idle') setBanner('idle', extraFor ? 'הציגו את התמונה הנוספת להזמנה #' + extraFor.serial : 'מוכן — הציגו בון'); }
     if ((state === 'idle' || state === 'hold') && rejSig){ if (state === 'hold') setState('idle'); setBanner('warn', 'לא נראה כמו בון — קרבו את הבון/המסך'); holdStart = 0; }
     else if (state === 'idle' || state === 'hold'){
-      if (present && motion <= P.stable){
+      if (present && motion <= P.stable * 2.2){ if (!looseStart) looseStart = now; } else looseStart = 0;
+      var loose = looseStart && now - looseStart >= P.loose;
+      if (present && (motion <= P.stable || (loose && motion <= P.stable * 2.2))){
         if (!holdStart){ holdStart = now; if (state !== 'hold'){ state = 'hold'; camwrap.classList.add('hold'); setBanner('hold', 'מחזיקים… אל תזיזו'); $('#hint').textContent = 'יציב — עוד רגע'; } }
         var pr = Math.min(1, (now - holdStart) / P.hold);
         $('#barfill').style.width = Math.round(pr * 100) + '%';
         if (pr >= 1){
           var tx = textiness(grabSmall()); lastMetrics.tx = tx;
-          if (tx < P.tx){ rejSig = L.slice(); setState('idle'); setBanner('warn', 'לא נראה כמו בון — קרבו את הבון/המסך'); }
+          if (tx < P.tx){ rejSig = L.slice(); looseStart = 0; setState('idle'); setBanner('warn', 'לא נראה כמו בון — קרבו את הבון/המסך'); }
           else capture('auto', L);
         }
       } else if (state === 'hold'){ setState('idle'); }
