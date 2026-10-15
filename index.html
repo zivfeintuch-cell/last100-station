@@ -124,7 +124,7 @@
   var CODE = (Q.get('e') || '').trim();
   function num(k, d){ var v = parseFloat(Q.get(k)); return isFinite(v) ? v : d; }
   // כיול (אפשר לשנות בכתובת, למשל ?hold=800&sd=22). ?debug=1 מציג מדדים חיים לכיול בשטח.
-  var P = { hold: num('hold', 1000), stable: num('stable', 3.0), sd: num('sd', 26), edge: num('edge', 5), cool: num('cool', 2500), change: num('change', 14), tick: 120 };
+  var P = { hold: num('hold', 1000), stable: num('stable', 3.0), sd: num('sd', 26), edge: num('edge', 5), tx: num('tx', 0.07), cool: num('cool', 2500), change: num('change', 14), tick: 120 };
   var DEBUG = Q.get('debug') === '1';
 
   function $(s){ return document.querySelector(s); }
@@ -204,6 +204,22 @@
     for (var y = 1; y < h - 1; y++) for (var x = 1; x < w - 1; x++){ var k = y * w + x, l = 4 * g[k] - g[k - 1] - g[k + 1] - g[k - w] - g[k + w]; s += l; s2 += l * l; n++; }
     return n ? (s2 / n - (s / n) * (s / n)) : 0;
   }
+  // "דמיון לטקסט": חלק מהבלוקים (16x16, באזור המרכזי) שיש בהם הרבה מעברים חדים אופקיים וניגודיות אמיתית — כך נראה טקסט.
+  // כוילה מול צילום אמיתי של פנים/חדר (≈0.02) מול טקסט סינתטי בגופנים 5-12px (≈0.15-0.33); סף ברירת מחדל 0.07 (?tx=).
+  function textiness(c){
+    var w = c.width, h = c.height, d = c.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h).data;
+    var B = 16, bx0 = Math.floor(w * 0.08 / B), bx1 = Math.floor(w * 0.92 / B), by0 = Math.floor(h * 0.08 / B), by1 = Math.floor(h * 0.92 / B), texty = 0, total = 0;
+    for (var by = by0; by < by1; by++) for (var bx = bx0; bx < bx1; bx++){
+      var trans = 0, mn = 255, mx = 0;
+      for (var y = by * B; y < by * B + B; y++){
+        var o = (y * w + bx * B) * 4, prev = 0.299 * d[o] + 0.587 * d[o + 1] + 0.114 * d[o + 2];
+        for (var x = 1; x < B; x++){ o += 4; var cur = 0.299 * d[o] + 0.587 * d[o + 1] + 0.114 * d[o + 2]; if (Math.abs(cur - prev) > 40) trans++; if (cur < mn) mn = cur; if (cur > mx) mx = cur; prev = cur; }
+      }
+      total++; if (trans >= 32 && mx - mn > 60) texty++;
+    }
+    return total ? texty / total : 0;
+  }
+  function grabSmall(){ var vw = video.videoWidth || 640, vh = video.videoHeight || 480, c = document.createElement('canvas'); c.width = 640; c.height = Math.max(16, Math.round(640 * vh / vw)); c.getContext('2d').drawImage(video, 0, 0, c.width, c.height); return c; }
   function grab(){                     // מצלם פריים מלא (עד 1500px) לקנבס
     var vw = video.videoWidth || 640, vh = video.videoHeight || 480, sca = Math.min(1, 1500 / Math.max(vw, vh));
     var c = document.createElement('canvas'); c.width = Math.round(vw * sca); c.height = Math.round(vh * sca);
@@ -212,7 +228,7 @@
   }
 
   /* ---------------- state machine ---------------- */
-  var state = 'idle', prev = null, refSig = null, holdStart = 0, changeStart = 0, coolStart = 0, lastMetrics = {}, extraFor = null, extraUntil = 0, capturing = false;
+  var state = 'idle', prev = null, refSig = null, rejSig = null, holdStart = 0, changeStart = 0, coolStart = 0, lastMetrics = {}, extraFor = null, extraUntil = 0, capturing = false;
   var camwrap = $('#camwrap');
   function setBanner(kind, text){ var b = $('#banner'); b.className = kind; b.textContent = text; }
   function setState(s){
@@ -231,22 +247,28 @@
     if (!stream || video.readyState < 2 || !video.videoWidth || capturing) return;
     var now = Date.now(), L = sample(), st = stats(L), motion = prev ? diff(L, prev) : 99; prev = L;
     var present = st.sd >= P.sd && st.edge >= P.edge;
-    lastMetrics = { sd: st.sd, edge: st.edge, motion: motion, present: present };
+    lastMetrics = { sd: st.sd, edge: st.edge, motion: motion, present: present, tx: lastMetrics.tx, sharp: lastMetrics.sharp };   // tx/sharp נשמרים בין טיקים — חשוב לכיול בשטח
     if (extraFor && state === 'idle' && now > extraUntil){ setState('idle'); }
 
-    if (state === 'idle' || state === 'hold'){
+    if (rejSig && (!present || diff(L, rejSig) >= P.change)){ rejSig = null; if (state === 'idle') setBanner('idle', extraFor ? 'הציגו את התמונה הנוספת להזמנה #' + extraFor.serial : 'מוכן — הציגו בון'); }
+    if ((state === 'idle' || state === 'hold') && rejSig){ if (state === 'hold') setState('idle'); setBanner('warn', 'לא נראה כמו בון — קרבו את הבון/המסך'); holdStart = 0; }
+    else if (state === 'idle' || state === 'hold'){
       if (present && motion <= P.stable){
         if (!holdStart){ holdStart = now; if (state !== 'hold'){ state = 'hold'; camwrap.classList.add('hold'); setBanner('hold', 'מחזיקים… אל תזיזו'); $('#hint').textContent = 'יציב — עוד רגע'; } }
         var pr = Math.min(1, (now - holdStart) / P.hold);
         $('#barfill').style.width = Math.round(pr * 100) + '%';
-        if (pr >= 1) capture('auto', L);
+        if (pr >= 1){
+          var tx = textiness(grabSmall()); lastMetrics.tx = tx;
+          if (tx < P.tx){ rejSig = L.slice(); setState('idle'); setBanner('warn', 'לא נראה כמו בון — קרבו את הבון/המסך'); }
+          else capture('auto', L);
+        }
       } else if (state === 'hold'){ setState('idle'); }
     } else if (state === 'cooldown'){
       var changed = !present || (refSig && diff(L, refSig) >= P.change);
       if (changed){ if (!changeStart) changeStart = now; if (now - changeStart >= 500 && now - coolStart >= P.cool) setState('idle'); }
       else changeStart = 0;
     }
-    if (DEBUG){ var d = $('#dbg'); d.hidden = false; d.textContent = 'state ' + state + '\nsd ' + st.sd.toFixed(1) + ' (min ' + P.sd + ')\nedge ' + st.edge.toFixed(1) + ' (min ' + P.edge + ')\nmotion ' + motion.toFixed(2) + ' (max ' + P.stable + ')\npresent ' + present + '\nsharp ' + (lastMetrics.sharp != null ? lastMetrics.sharp.toFixed(0) : '-'); }
+    if (DEBUG){ var d = $('#dbg'); d.hidden = false; d.textContent = 'state ' + state + '\nsd ' + st.sd.toFixed(1) + ' (min ' + P.sd + ')\nedge ' + st.edge.toFixed(1) + ' (min ' + P.edge + ')\nmotion ' + motion.toFixed(2) + ' (max ' + P.stable + ')\npresent ' + present + '\ntext ' + (lastMetrics.tx != null ? lastMetrics.tx.toFixed(3) : '-') + ' (min ' + P.tx + ')\nsharp ' + (lastMetrics.sharp != null ? lastMetrics.sharp.toFixed(0) : '-'); }
   }
 
   var queueTimer = null;
@@ -316,6 +338,7 @@
       post({ action: 'finish', code: CODE, id: it.id, img: it.b64, mime: 'image/jpeg' }, 90000).then(function(res){
         if (!res || res.ok !== true) return fail(it, res);
         it.stage = 'done'; it.busy = false; it.res = res; it.b64 = null; it.err = '';
+        if (res.nothingRead && it.kind === 'auto'){ discard(it); return; }          // לא היה בון בתמונה — מבטלים את השורה
         showRead(it, res, false); render(); setTimeout(pump, 0);
       });
     } else if (it.stage === 'extra'){
@@ -331,12 +354,26 @@
   window.addEventListener('online', pump);
   window.addEventListener('beforeunload', function(e){ if (active().length){ e.preventDefault(); e.returnValue = ''; } });
 
+  function discard(it){
+    it.discarding = true;
+    var finishUi = function(ok){
+      it.discarded = true;
+      if (lastItem === it){
+        $('#serialBox').hidden = true; lastItem = null;
+        setBanner('idle', ok ? 'לא זוהה בון — בוטל אוטומטית. הציגו בון' : 'לא זוהה בון — בטלו את השורה #' + it.serial + ' בלוח');
+        render();
+      }
+      render(); setTimeout(pump, 0);
+    };
+    post({ action: 'discard', code: CODE, id: it.id }, 25000).then(function(r){ finishUi(!!(r && r.ok)); });
+  }
   function summary(o){
     o = o || {};
     return [o.company, o.tower, o.floor ? 'קומה ' + o.floor : '', o.orderNo ? 'הזמנה ' + o.orderNo : '', o.customer].filter(Boolean).join(' · ');
   }
   function showRead(it, res, isExtra){
     if (it !== lastItem && !(isExtra && lastItem && lastItem.id === it.id)) return;        // הוצגה בינתיים הזמנה חדשה יותר — לא דורסים
+    if (!isExtra && res.nothingRead){ setBanner('err', 'לא זוהו נתונים בבון — למלא ידנית בלוח'); $('#serialBox').hidden = false; $('#serial').textContent = '#' + (it.serial || ''); $('#serial').className = ''; $('#detail').textContent = ''; beep('err'); return; }
     var o = res.order || {}, dupTxt = res.duplicate ? (res.dupKind === 'likely' ? 'כפילות אפשרית' : 'כפילות') + (res.dupOf ? ' להזמנה #' + res.dupOf : '') : '';
     var kind = (!isExtra && res.aiFailed) ? 'err' : (res.duplicate ? 'warn' : 'ok');
     var head = isExtra ? ((res.added && res.added.length) ? 'עודכן ✓ · נוסף: ' + res.added.join(', ') : 'התמונה נשמרה')
@@ -367,7 +404,8 @@
     $('#btnRetry').hidden = !retryable; $('#btnRetry').textContent = '🔁 נסה שוב (' + retryable + ')';
     $('#recent').innerHTML = items.slice(0, 8).map(function(it){
       var o = (it.res && it.res.order) || {}, st, cls = '';
-      if (it.failed){ st = 'נכשל: ' + esc(it.err || ''); cls = ' bad'; }
+      if (it.discarded){ st = 'לא היה בון — בוטל'; }
+      else if (it.failed){ st = 'נכשל: ' + esc(it.err || ''); cls = ' bad'; }
       else if (it.stage === 'done'){ st = it.mode === 'extra' ? 'תמונה נוספת ✓' : (it.res && it.res.aiFailed ? 'למילוי ידני' : it.res && it.res.duplicate ? 'כפילות' : 'נקרא ✓'); if (it.res && (it.res.aiFailed)) cls = ' bad'; else if (it.res && it.res.duplicate) cls = ' dup'; }
       else if (it.err){ st = 'מנסה שוב… (' + esc(it.err) + ')'; }
       else st = it.stage === 'start' ? 'שומר…' : 'קורא…';
